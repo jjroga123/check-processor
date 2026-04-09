@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Check Processor — Sheets</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -80,6 +81,9 @@
   .del-btn:hover { color: #A32D2D; background: #FCEBEB; }
   .add-row-btn { margin-top: 10px; font-size: 12px; padding: 6px 14px; }
   .ci { width: 66px; } .cf { width: 21%; } .cc { width: 18%; } .ca { width: 105px; } .cd { width: 100px; } .cs { width: 85px; }
+  .gauth-bar { display: flex; align-items: center; gap: 12px; background: var(--bg2); border-radius: var(--rad); padding: 10px 14px; margin-bottom: 1rem; font-size: 13px; }
+  .gauth-bar .status { color: var(--txt2); flex: 1; }
+  .gauth-bar .status.signed-in { color: #3B6D11; }
 </style>
 </head>
 <body>
@@ -142,6 +146,13 @@
   <!-- PUSH -->
   <div class="panel" id="panel-push">
     <div class="info">Ready to append <span id="pcnt">0</span> row(s) to your Google Sheet. Columns: Issuing Firm, Client Name, Amount, Date, Status, Date Logged.</div>
+
+    <!-- Google Auth bar -->
+    <div class="gauth-bar">
+      <span class="status" id="gauth-status">Not signed in to Google</span>
+      <button class="btn" id="gauth-btn" onclick="googleSignIn()">Sign in with Google</button>
+    </div>
+
     <div id="pprev"></div>
     <div class="btnrow">
       <button class="btn" onclick="go('review')">← Back</button>
@@ -168,24 +179,70 @@
     <div class="field">
       <label>Sheet tab name</label>
       <input type="text" id="s-tab" placeholder="Settlements">
-      <small>Exact name of the tab to append rows to</small>
-    </div>
-    <div class="field">
-      <label>Google Sheets API key</label>
-      <input type="password" id="s-gk" placeholder="AIza...">
-      <small>From <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console → Credentials</a>. Sheets API must be enabled. Sheet must be shared as "Anyone with link → Editor".</small>
+      <small>Exact name of the tab to append rows to (e.g. Sheet1)</small>
     </div>
     <div style="display:flex;align-items:center;margin-top:0.5rem;">
       <button class="btn" onclick="saveCfg()">Save settings</button>
       <span id="smsg" style="margin-left:10px;font-size:12px;color:#3B6D11;opacity:0;transition:opacity 0.3s;">Saved</span>
     </div>
-    <p style="font-size:11px;color:var(--txt3);margin-top:10px;">Stored in browser session only.</p>
+    <p style="font-size:11px;color:var(--txt3);margin-top:10px;">Stored in browser session only. Google sign-in is handled via OAuth2 on the Push tab.</p>
   </div>
 </div>
 
 <script>
-const ST = { files: [], photos: [], checks: [], cfg: {} };
+const GOOGLE_CLIENT_ID = '1093771812638-2c8u92kasbok2vt8teasv1qve9ptmhe8.apps.googleusercontent.com';
+const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
 
+const ST = { files: [], photos: [], checks: [], cfg: {}, gToken: null };
+
+// ── Google OAuth2 via GIS token client ──────────────────────────────────────
+let tokenClient;
+
+window.addEventListener('load', () => {
+  // Init GIS token client once the library loads
+  const initGIS = () => {
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: SHEETS_SCOPE,
+      callback: (resp) => {
+        if (resp.error) {
+          updateGAuthBar(false);
+          alert('Google sign-in failed: ' + resp.error);
+          return;
+        }
+        ST.gToken = resp.access_token;
+        updateGAuthBar(true);
+      },
+    });
+  };
+  // GIS script may not be ready immediately
+  if (typeof google !== 'undefined' && google.accounts) {
+    initGIS();
+  } else {
+    document.querySelector('script[src*="gsi/client"]').addEventListener('load', initGIS);
+  }
+});
+
+function googleSignIn() {
+  if (!tokenClient) { alert('Google auth not ready yet, please wait a moment and try again.'); return; }
+  tokenClient.requestAccessToken();
+}
+
+function updateGAuthBar(signedIn) {
+  const status = document.getElementById('gauth-status');
+  const btn = document.getElementById('gauth-btn');
+  if (signedIn) {
+    status.textContent = '✓ Signed in to Google — ready to push';
+    status.className = 'status signed-in';
+    btn.textContent = 'Re-authenticate';
+  } else {
+    status.textContent = 'Not signed in to Google';
+    status.className = 'status';
+    btn.textContent = 'Sign in with Google';
+  }
+}
+
+// ── App state & navigation ───────────────────────────────────────────────────
 function go(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
@@ -200,11 +257,11 @@ function saveCfg() {
   ST.cfg.ant = document.getElementById('s-ant').value.trim();
   ST.cfg.sid = document.getElementById('s-sid').value.trim();
   ST.cfg.tab = document.getElementById('s-tab').value.trim();
-  ST.cfg.gk  = document.getElementById('s-gk').value.trim();
   const m = document.getElementById('smsg');
   m.style.opacity = 1; setTimeout(() => m.style.opacity = 0, 2000);
 }
 
+// ── File handling ────────────────────────────────────────────────────────────
 const dz = document.getElementById('dz');
 dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
 dz.addEventListener('dragleave', () => dz.classList.remove('over'));
@@ -264,6 +321,7 @@ function addLog(boxId, msg, type) {
   box.appendChild(d); box.scrollTop = box.scrollHeight;
 }
 
+// ── Claude extraction ────────────────────────────────────────────────────────
 const PROMPT = `You are analyzing a photo that may contain one or more physical checks.
 
 Carefully examine the ENTIRE image and identify EVERY check visible, even partially visible ones.
@@ -357,6 +415,7 @@ async function extractAll() {
   go('review');
 }
 
+// ── Review table ─────────────────────────────────────────────────────────────
 function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 
 function renderTable() {
@@ -396,6 +455,7 @@ function addBlankRow() {
   if (last) last.querySelector('input').focus();
 }
 
+// ── Push preview ─────────────────────────────────────────────────────────────
 function renderPush() {
   document.getElementById('pcnt').textContent = ST.checks.length;
   const div = document.getElementById('pprev');
@@ -413,19 +473,24 @@ function renderPush() {
   div.innerHTML = `<div style="overflow-x:auto;margin-bottom:1rem;"><table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr>${hdr}</tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
+// ── Push to Sheets via OAuth2 token ──────────────────────────────────────────
 async function pushAll() {
+  if (!ST.gToken) {
+    addLog('plog', 'Please sign in with Google first.', 'er');
+    document.getElementById('plog').style.display = 'block';
+    return;
+  }
+
+  const sid = ST.cfg.sid || document.getElementById('s-sid').value.trim();
+  const tab = ST.cfg.tab || document.getElementById('s-tab').value.trim() || 'Sheet1';
+
+  if (!sid) { addLog('plog','Google Sheet ID missing — check Settings','er'); return; }
+
   const btn = document.getElementById('pbtn');
   const spin = document.getElementById('pspin');
   const lbl = document.getElementById('plbl');
   btn.disabled = true; spin.style.display = 'block';
   document.getElementById('plog').innerHTML = '';
-
-  const gk  = ST.cfg.gk  || document.getElementById('s-gk').value.trim();
-  const sid  = ST.cfg.sid  || document.getElementById('s-sid').value.trim();
-  const tab  = ST.cfg.tab  || document.getElementById('s-tab').value.trim() || 'Sheet1';
-
-  if (!gk)  { addLog('plog','Google Sheets API key missing — check Settings','er'); btn.disabled=false; spin.style.display='none'; return; }
-  if (!sid) { addLog('plog','Google Sheet ID missing — check Settings','er'); btn.disabled=false; spin.style.display='none'; return; }
 
   let ok=0, fail=0;
   for (let i=0; i<ST.checks.length; i++) {
@@ -434,9 +499,21 @@ async function pushAll() {
     addLog('plog', `Sending: ${c.firm||'?'} · ${c.client||'no client'} · $${c.amount}`, 'in');
     try {
       const values = [[c.firm, c.client, c.amount, c.date, 'Settled', new Date().toLocaleDateString()]];
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${encodeURIComponent(tab)}!A1:append?valueInputOption=USER_ENTERED&key=${gk}`;
-      const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({values}) });
-      if (!r.ok) { const e = await r.json(); throw new Error(e.error?.message || `HTTP ${r.status}`); }
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${encodeURIComponent(tab)}!A1:append?valueInputOption=USER_ENTERED`;
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${ST.gToken}`
+        },
+        body: JSON.stringify({ values })
+      });
+      if (!r.ok) {
+        const e = await r.json();
+        // Token may have expired — clear it so user re-authenticates
+        if (r.status === 401) { ST.gToken = null; updateGAuthBar(false); }
+        throw new Error(e.error?.message || `HTTP ${r.status}`);
+      }
       addLog('plog', `✓ Added: ${c.firm}${c.client?' — '+c.client:''}`, 'ok');
       ok++;
     } catch(err) {
