@@ -331,53 +331,58 @@ function rmvPhoto(i) {
 }
 
 // Compress + resize image non-blocking using createImageBitmap + OffscreenCanvas.
-// Keeps full resolution and targets max 4.9MB JPEG at highest quality.
+// Guarantees the base64-encoded output stays under Anthropic's 5MB API limit.
 async function compressImage(file) {
-  const MAX_BYTES = 4.9 * 1024 * 1024;
+  // Anthropic limit is 5MB on the base64 string.
+  // base64 inflates by ~33%, so the raw blob must stay under 5MB / 1.37 ≈ 3.65MB.
+  const MAX_B64_BYTES = 5 * 1024 * 1024;
+  const MAX_BLOB_BYTES = Math.floor(MAX_B64_BYTES / 1.37); // ~3.65MB blob target
 
-  // If file is already under the limit, just read it directly
-  if (file.size <= MAX_BYTES) {
+  // Helper: read a blob as base64 and return {b64, mime}
+  function blobToB64(blob) {
     return new Promise((res, rej) => {
       const r = new FileReader();
-      r.onload = () => res({ b64: r.result.split(',')[1], mime: file.type || 'image/jpeg' });
+      r.onload = () => res({ b64: r.result.split(',')[1], mime: 'image/jpeg' });
       r.onerror = () => rej(new Error('Read failed'));
-      r.readAsDataURL(file);
+      r.readAsDataURL(blob);
     });
   }
 
   // createImageBitmap decodes off the main thread — no freeze
   const bitmap = await createImageBitmap(file);
-  const { width: w, height: h } = bitmap;
+  let { width: w, height: h } = bitmap;
 
-  // Keep full resolution, only scale down if absolutely needed
-  const canvas = new OffscreenCanvas(w, h);
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(bitmap, 0, 0, w, h);
+  // Start at full resolution, scale down progressively until we fit
+  let blob, attempts = 0;
+  while (true) {
+    const canvas = new OffscreenCanvas(w, h);
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, w, h);
+
+    // Try quality steps at this resolution
+    const qualities = [0.95, 0.88, 0.80, 0.70, 0.60];
+    blob = null;
+    for (const q of qualities) {
+      const b = await canvas.convertToBlob({ type: 'image/jpeg', quality: q });
+      if (b.size <= MAX_BLOB_BYTES) { blob = b; break; }
+    }
+
+    if (blob) break; // fits!
+
+    // Still too big — reduce resolution by 25% and retry
+    attempts++;
+    if (attempts > 6) {
+      // Force fit at lowest quality
+      const canvas2 = new OffscreenCanvas(w, h);
+      canvas2.getContext('2d').drawImage(bitmap, 0, 0, w, h);
+      blob = await canvas2.convertToBlob({ type: 'image/jpeg', quality: 0.5 });
+      break;
+    }
+    w = Math.round(w * 0.75);
+    h = Math.round(h * 0.75);
+  }
+
   bitmap.close();
-
-  // Try quality 1.0 first, step down only until under 4.9MB
-  const qualities = [1.0, 0.97, 0.95, 0.92, 0.90, 0.85, 0.80];
-  let blob;
-  for (const q of qualities) {
-    blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: q });
-    if (blob.size <= MAX_BYTES) break;
-  }
-
-  // Last resort: scale down resolution to fit
-  if (blob.size > MAX_BYTES) {
-    const scale = Math.sqrt(MAX_BYTES / blob.size);
-    const sw = Math.round(w * scale), sh = Math.round(h * scale);
-    const canvas2 = new OffscreenCanvas(sw, sh);
-    canvas2.getContext('2d').drawImage(canvas, 0, 0, sw, sh);
-    blob = await canvas2.convertToBlob({ type: 'image/jpeg', quality: 0.92 });
-  }
-
-  return new Promise((res, rej) => {
-    const r = new FileReader();
-    r.onload = () => res({ b64: r.result.split(',')[1], mime: 'image/jpeg' });
-    r.onerror = () => rej(new Error('Read failed'));
-    r.readAsDataURL(blob);
-  });
+  return blobToB64(blob);
 }
 
 function addLog(boxId, msg, type) {
