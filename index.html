@@ -301,7 +301,7 @@ async function extractAll() {
       const b64 = await fileToB64(ST.files[i]);
       const mt = ST.files[i].type || 'image/jpeg';
 
-      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      const resp = await fetch('https://anthropic-proxy.jonathan-ae8.workers.dev/v1/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
         body: JSON.stringify({
