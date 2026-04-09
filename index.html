@@ -171,16 +171,7 @@
       <input type="password" id="s-ant" placeholder="sk-ant-..." autocomplete="off">
       <small>Powers Claude Vision. Get yours at <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a></small>
     </div>
-    <div class="field">
-      <label>Google Sheet ID</label>
-      <input type="text" id="s-sid" placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms">
-      <small>From your Sheet URL: docs.google.com/spreadsheets/d/<strong>[ID HERE]</strong>/edit</small>
-    </div>
-    <div class="field">
-      <label>Sheet tab name</label>
-      <input type="text" id="s-tab" placeholder="Settlements">
-      <small>Exact name of the tab to append rows to (e.g. Sheet1)</small>
-    </div>
+
     <div style="display:flex;align-items:center;margin-top:0.5rem;">
       <button class="btn" onclick="saveCfg()">Save settings</button>
       <span id="smsg" style="margin-left:10px;font-size:12px;color:#3B6D11;opacity:0;transition:opacity 0.3s;">Saved</span>
@@ -192,6 +183,8 @@
 <script>
 const GOOGLE_CLIENT_ID = '1093771812638-2c8u92kasbok2vt8teasv1qve9ptmhe8.apps.googleusercontent.com';
 const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
+const SHEET_ID = '1t_-WK6-k78YRfukwNn6x7ZsIyTZfvOSe-IIB7R8n2Cc';
+const SHEET_TAB = 'Sheet1';
 
 const ST = { files: [], photos: [], checks: [], cfg: {}, gToken: null };
 
@@ -255,8 +248,6 @@ function go(name) {
 
 function saveCfg() {
   ST.cfg.ant = document.getElementById('s-ant').value.trim();
-  ST.cfg.sid = document.getElementById('s-sid').value.trim();
-  ST.cfg.tab = document.getElementById('s-tab').value.trim();
   const m = document.getElementById('smsg');
   m.style.opacity = 1; setTimeout(() => m.style.opacity = 0, 2000);
 }
@@ -496,6 +487,46 @@ function renderPush() {
   div.innerHTML = `<div style="overflow-x:auto;margin-bottom:1rem;"><table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr>${hdr}</tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function toMoney(val) {
+  const n = parseFloat((val||'').toString().replace(/[^0-9.]/g, '')) || 0;
+  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function parseMoney(val) {
+  return parseFloat((val||'').toString().replace(/[^0-9.]/g, '')) || 0;
+}
+function normKey(firm, client) {
+  return (firm||'').trim().toLowerCase() + '|||' + (client||'').trim().toLowerCase();
+}
+
+// Fetch all existing rows from the sheet
+async function fetchSheetRows() {
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(SHEET_TAB)}?majorDimension=ROWS`;
+  const r = await fetch(url, { headers: { 'Authorization': `Bearer ${ST.gToken}` } });
+  if (!r.ok) {
+    if (r.status === 401) { ST.gToken = null; updateGAuthBar(false); }
+    const e = await r.json();
+    throw new Error(e.error?.message || `HTTP ${r.status}`);
+  }
+  const data = await r.json();
+  return data.values || [];
+}
+
+// Update a specific row's amount, date, status, and date-logged (1-indexed)
+async function updateSheetRow(rowNum, newAmount, newDate) {
+  const range = `${encodeURIComponent(SHEET_TAB)}!C${rowNum}:F${rowNum}`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${range}?valueInputOption=USER_ENTERED`;
+  const r = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ST.gToken}` },
+    body: JSON.stringify({ values: [[toMoney(newAmount), newDate, 'Settled', new Date().toLocaleDateString()]] })
+  });
+  if (!r.ok) {
+    const e = await r.json();
+    throw new Error(e.error?.message || `HTTP ${r.status}`);
+  }
+}
+
 // ── Push to Sheets via OAuth2 token ──────────────────────────────────────────
 async function pushAll() {
   if (!ST.gToken) {
@@ -504,49 +535,88 @@ async function pushAll() {
     return;
   }
 
-  const sid = ST.cfg.sid || document.getElementById('s-sid').value.trim();
-  const tab = ST.cfg.tab || document.getElementById('s-tab').value.trim() || 'Sheet1';
-
-  if (!sid) { addLog('plog','Google Sheet ID missing — check Settings','er'); return; }
-
   const btn = document.getElementById('pbtn');
   const spin = document.getElementById('pspin');
   const lbl = document.getElementById('plbl');
   btn.disabled = true; spin.style.display = 'block';
   document.getElementById('plog').innerHTML = '';
 
-  let ok=0, fail=0;
-  for (let i=0; i<ST.checks.length; i++) {
-    const c = ST.checks[i];
-    lbl.textContent = `Pushing ${i+1} of ${ST.checks.length}...`;
-    addLog('plog', `Sending: ${c.firm||'?'} · ${c.client||'no client'} · $${c.amount}`, 'in');
-    try {
-      const values = [[c.firm, c.client, c.amount, c.date, 'Settled', new Date().toLocaleDateString()]];
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${encodeURIComponent(tab)}!A1:append?valueInputOption=USER_ENTERED`;
-      const r = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${ST.gToken}`
-        },
-        body: JSON.stringify({ values })
-      });
-      if (!r.ok) {
-        const e = await r.json();
-        // Token may have expired — clear it so user re-authenticates
-        if (r.status === 401) { ST.gToken = null; updateGAuthBar(false); }
-        throw new Error(e.error?.message || `HTTP ${r.status}`);
-      }
-      addLog('plog', `✓ Added: ${c.firm}${c.client?' — '+c.client:''}`, 'ok');
-      ok++;
-    } catch(err) {
-      addLog('plog', `✗ Failed: ${err.message}`, 'er');
-      fail++;
+  let added=0, updated=0, skipped=0, fail=0;
+
+  try {
+    addLog('plog', 'Reading existing sheet data for duplicate check...', 'in');
+    const rows = await fetchSheetRows();
+
+    // Build lookup: normKey -> { rowNum (1-indexed), amount, date }
+    // Skip header row if column C is not a number
+    const existing = {};
+    const dataStart = (rows.length > 0 && isNaN(parseMoney(rows[0][2]))) ? 1 : 0;
+    for (let r = dataStart; r < rows.length; r++) {
+      const row = rows[r];
+      const key = normKey(row[0], row[1]);
+      existing[key] = { rowNum: r + 1, amount: row[2] || '0', date: (row[3] || '').trim() };
     }
+    addLog('plog', `Found ${Object.keys(existing).length} existing records.`, 'in');
+
+    for (let i = 0; i < ST.checks.length; i++) {
+      const c = ST.checks[i];
+      lbl.textContent = `Processing ${i+1} of ${ST.checks.length}...`;
+      const key = normKey(c.firm, c.client);
+      const label = `${c.firm||'?'}${c.client ? ' — ' + c.client : ''}`;
+
+      try {
+        if (existing[key]) {
+          const ex = existing[key];
+          if (ex.date === (c.date||'').trim()) {
+            // Same firm + client + date = exact duplicate, skip
+            addLog('plog', `⊘ Skipped duplicate: ${label} (${c.date})`, 'in');
+            skipped++;
+          } else {
+            // Same firm + client, different date = add amounts, update row
+            const combined = parseMoney(ex.amount) + parseMoney(c.amount);
+            addLog('plog', `↑ Updating: ${label} · ${toMoney(ex.amount)} + ${toMoney(c.amount)} = ${toMoney(combined)}`, 'in');
+            await updateSheetRow(ex.rowNum, combined, c.date);
+            existing[key].amount = combined.toString();
+            existing[key].date = c.date;
+            addLog('plog', `✓ Updated row ${ex.rowNum}: ${label}`, 'ok');
+            updated++;
+          }
+        } else {
+          // New record — append
+          addLog('plog', `Adding: ${label} · ${toMoney(c.amount)}`, 'in');
+          const values = [[c.firm, c.client, toMoney(c.amount), c.date, 'Settled', new Date().toLocaleDateString()]];
+          const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(SHEET_TAB)}!A1:append?valueInputOption=USER_ENTERED`;
+          const r = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ST.gToken}` },
+            body: JSON.stringify({ values })
+          });
+          if (!r.ok) {
+            const e = await r.json();
+            if (r.status === 401) { ST.gToken = null; updateGAuthBar(false); }
+            throw new Error(e.error?.message || `HTTP ${r.status}`);
+          }
+          existing[key] = { rowNum: rows.length + added + 1, amount: c.amount, date: c.date };
+          addLog('plog', `✓ Added: ${label}`, 'ok');
+          added++;
+        }
+      } catch(err) {
+        addLog('plog', `✗ Failed (${label}): ${err.message}`, 'er');
+        fail++;
+      }
+    }
+  } catch(err) {
+    addLog('plog', `✗ Could not read sheet: ${err.message}`, 'er');
+    fail++;
   }
 
   spin.style.display = 'none'; lbl.textContent = 'Push to Google Sheets'; btn.disabled = false;
-  addLog('plog', `Done — ${ok} succeeded${fail?', '+fail+' failed':''}.`, fail?'er':'ok');
+  const parts = [];
+  if (added) parts.push(`${added} added`);
+  if (updated) parts.push(`${updated} updated`);
+  if (skipped) parts.push(`${skipped} skipped`);
+  if (fail) parts.push(`${fail} failed`);
+  addLog('plog', `Done — ${parts.join(', ') || 'nothing to do'}.`, fail ? 'er' : 'ok');
 }
 </script>
 </body>
