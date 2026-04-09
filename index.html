@@ -303,12 +303,36 @@ function rmvPhoto(i) {
   document.getElementById('ebtn').disabled = ST.files.length === 0;
 }
 
-async function fileToB64(file) {
+// Compress + resize image non-blocking using createImageBitmap + OffscreenCanvas.
+// Scales down to max 2048px on the long edge and targets ~1.5MB JPEG output.
+async function compressImage(file) {
+  const MAX_PX = 2048;
+  const MAX_BYTES = 1.5 * 1024 * 1024;
+
+  // createImageBitmap decodes off the main thread — no freeze
+  const bitmap = await createImageBitmap(file);
+  const { width: w, height: h } = bitmap;
+
+  const scale = Math.min(1, MAX_PX / Math.max(w, h));
+  const tw = Math.round(w * scale);
+  const th = Math.round(h * scale);
+
+  const canvas = new OffscreenCanvas(tw, th);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, 0, 0, tw, th);
+  bitmap.close();
+
+  // Try quality 0.85 first, drop to 0.7 if still too large
+  let blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
+  if (blob.size > MAX_BYTES) {
+    blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.7 });
+  }
+
   return new Promise((res, rej) => {
     const r = new FileReader();
-    r.onload = () => res(r.result.split(',')[1]);
+    r.onload = () => res({ b64: r.result.split(',')[1], mime: 'image/jpeg' });
     r.onerror = () => rej(new Error('Read failed'));
-    r.readAsDataURL(file);
+    r.readAsDataURL(blob);
   });
 }
 
@@ -355,9 +379,8 @@ async function extractAll() {
     renderPrev();
 
     try {
-      addLog('elog', `Reading photo ${i+1}...`, 'in');
-      const b64 = await fileToB64(ST.files[i]);
-      const mt = ST.files[i].type || 'image/jpeg';
+      addLog('elog', `Compressing photo ${i+1}...`, 'in');
+      const { b64, mime: mt } = await compressImage(ST.files[i]);
 
       const resp = await fetch('https://anthropic-proxy.jonathan-ae8.workers.dev/v1/messages', {
         method: 'POST',
