@@ -571,6 +571,12 @@ function normKey(firm, client) {
   return normStr(firm) + '|||' + normStr(client);
 }
 
+// Normalize date: strip leading zeros from month and day so
+// "02/19/2026" and "2/19/2026" compare as equal.
+function normDate(d) {
+  return (d||'').trim().replace(/(^|\/)0+(\d)/g, '$1$2');
+}
+
 // Fetch all existing rows from the sheet
 async function fetchSheetRows() {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(SHEET_TAB)}?majorDimension=ROWS`;
@@ -626,7 +632,7 @@ async function pushAll() {
     for (let r = dataStart; r < rows.length; r++) {
       const row = rows[r];
       const key = normKey(row[0], row[1]);
-      existing[key] = { rowNum: r + 1, amount: row[2] || '0', date: (row[3] || '').trim() };
+      existing[key] = { rowNum: r + 1, amount: row[2] || '0', date: normDate(row[3]) };
     }
     addLog('plog', `Found ${Object.keys(existing).length} existing records.`, 'in');
 
@@ -641,7 +647,7 @@ async function pushAll() {
         const matchedKey = findFuzzyMatch(existing, c.firm, c.client) || (existing[key] ? key : null);
         if (matchedKey) {
           const ex = existing[matchedKey];
-          if (ex.date === (c.date||'').trim()) {
+          if (ex.date === normDate(c.date)) {
             // Same firm + client + date = exact duplicate, skip
             addLog('plog', `⊘ Skipped duplicate: ${label} (${c.date})`, 'in');
             skipped++;
@@ -651,7 +657,7 @@ async function pushAll() {
             addLog('plog', `↑ Updating: ${label} · ${toMoney(ex.amount)} + ${toMoney(c.amount)} = ${toMoney(combined)}`, 'in');
             await updateSheetRow(ex.rowNum, combined, c.date);
             existing[matchedKey].amount = combined.toString();
-            existing[matchedKey].date = c.date;
+            existing[matchedKey].date = normDate(c.date);
             addLog('plog', `✓ Updated row ${ex.rowNum}: ${label}`, 'ok');
             updated++;
           }
@@ -670,7 +676,7 @@ async function pushAll() {
             if (r.status === 401) { ST.gToken = null; updateGAuthBar(false); }
             throw new Error(e.error?.message || `HTTP ${r.status}`);
           }
-          existing[key] = { rowNum: rows.length + added + 1, amount: c.amount, date: c.date };
+          existing[key] = { rowNum: rows.length + added + 1, amount: c.amount, date: normDate(c.date) };
           addLog('plog', `✓ Added: ${label}`, 'ok');
           added++;
         }
