@@ -324,12 +324,7 @@ async function extractAll() {
       // Using claude-3-5-sonnet-20241022 as it's the current standard for vision tasks
       const resp = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json', 
-          'x-api-key': apiKey, 
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerously-allow-browser': 'true' // Required for browser-based requests
-        },
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
         body: JSON.stringify({
           model: 'claude-3-5-sonnet-20241022',
           max_tokens: 2000,
