@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Check Processor — Sheets</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #ffffff; --bg2: #f5f5f3; --txt: #1a1a18; --txt2: #6b6b67; --txt3: #a0a09c;
+    --b1: rgba(0,0,0,0.35); --b2: rgba(0,0,0,0.22); --b3: rgba(0,0,0,0.12);
+    --rad: 8px; --radlg: 12px;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --mono: 'SF Mono', 'Fira Code', monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1e1e1c; --bg2: #2a2a28; --txt: #f0f0ec; --txt2: #9a9a94; --txt3: #606060;
+      --b1: rgba(255,255,255,0.3); --b2: rgba(255,255,255,0.18); --b3: rgba(255,255,255,0.1);
+    }
+  }
+  body { font-family: var(--sans); background: var(--bg2); color: var(--txt); min-height: 100vh; padding: 2rem 1rem; }
+  .app { max-width: 960px; margin: 0 auto; background: var(--bg); border-radius: var(--radlg); border: 0.5px solid var(--b3); padding: 2rem; }
+  h1 { font-size: 20px; font-weight: 500; }
+  .sub { font-size: 13px; color: var(--txt2); margin-top: 4px; margin-bottom: 1.5rem; }
+  .tabs { display: flex; border-bottom: 0.5px solid var(--b3); margin-bottom: 1.5rem; }
+  .tab { padding: 8px 16px; font-size: 13px; cursor: pointer; color: var(--txt2); border-bottom: 2px solid transparent; margin-bottom: -0.5px; background: none; border-top: none; border-left: none; border-right: none; font-family: var(--sans); }
+  .tab.active { color: var(--txt); border-bottom-color: var(--txt); font-weight: 500; }
+  .panel { display: none; } .panel.active { display: block; }
+  .info { background: var(--bg2); border-radius: var(--rad); border-left: 3px solid #378ADD; padding: 10px 14px; font-size: 13px; color: var(--txt2); margin-bottom: 1.5rem; line-height: 1.6; }
+  .field { margin-bottom: 1rem; }
+  .field label { display: block; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; color: var(--txt2); margin-bottom: 5px; }
+  .field input { width: 100%; padding: 9px 11px; font-size: 13px; border: 0.5px solid var(--b2); border-radius: var(--rad); background: var(--bg); color: var(--txt); font-family: var(--mono); }
+  .field input:focus { outline: none; border-color: var(--b1); }
+  .field small { display: block; font-size: 11px; color: var(--txt3); margin-top: 5px; line-height: 1.5; }
+  .field small a { color: #185FA5; text-decoration: none; }
+  .drop-zone { border: 1.5px dashed var(--b2); border-radius: var(--radlg); padding: 2.5rem 2rem; text-align: center; cursor: pointer; transition: all 0.15s; position: relative; }
+  .drop-zone.over { border-color: var(--b1); background: var(--bg2); }
+  .drop-zone svg { width: 34px; height: 34px; opacity: 0.28; stroke: var(--txt); margin-bottom: 1rem; }
+  .drop-zone h3 { font-size: 15px; font-weight: 500; margin-bottom: 5px; }
+  .drop-zone p { font-size: 13px; color: var(--txt2); }
+  .drop-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+  .pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 1rem; }
+  .tw { position: relative; border-radius: var(--rad); overflow: hidden; border: 0.5px solid var(--b3); aspect-ratio: 4/3; background: var(--bg2); }
+  .tw img { width: 100%; height: 100%; object-fit: cover; }
+  .tw .xbtn { position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.55); color: white; border: none; border-radius: 50%; width: 20px; height: 20px; font-size: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .tw .info-pill { position: absolute; bottom: 4px; left: 4px; right: 28px; font-size: 10px; padding: 2px 7px; border-radius: 4px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bp { background: #faeeda; color: #854F0B; }
+  .bd { background: #EAF3DE; color: #3B6D11; }
+  .be { background: #FCEBEB; color: #A32D2D; }
+  .bw { background: #E6F1FB; color: #185FA5; }
+  .btnrow { display: flex; gap: 10px; align-items: center; margin-top: 1.25rem; flex-wrap: wrap; }
+  .btn { padding: 9px 22px; font-size: 13px; font-weight: 500; border-radius: var(--rad); cursor: pointer; font-family: var(--sans); display: inline-flex; align-items: center; gap: 8px; border: 0.5px solid var(--b2); background: var(--bg); color: var(--txt); }
+  .btn:hover { background: var(--bg2); }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .btn.p { background: var(--txt); color: var(--bg); border-color: var(--b1); }
+  .btn.p:hover { opacity: 0.85; }
+  .spin { width: 13px; height: 13px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: rot 0.7s linear infinite; display: none; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+  .cnt { font-size: 13px; color: var(--txt2); }
+  .slbl { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; color: var(--txt3); margin-bottom: 10px; }
+  .twrap { overflow-x: auto; }
+  table.rt { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+  table.rt th { text-align: left; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.03em; color: var(--txt2); padding: 6px 8px; border-bottom: 0.5px solid var(--b3); }
+  table.rt td { padding: 7px 8px; border-bottom: 0.5px solid var(--b3); vertical-align: middle; }
+  table.rt td input { width: 100%; border: 0.5px solid transparent; border-radius: 4px; padding: 4px 5px; font-size: 13px; background: transparent; color: var(--txt); font-family: var(--sans); }
+  table.rt td input:hover { border-color: var(--b2); background: var(--bg2); }
+  table.rt td input:focus { outline: none; border-color: var(--b1); background: var(--bg2); }
+  .ckt { width: 52px; height: 32px; object-fit: cover; border-radius: 3px; border: 0.5px solid var(--b3); display: block; }
+  .rb { display: inline-flex; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 500; white-space: nowrap; }
+  .rb.ok { background: #EAF3DE; color: #3B6D11; }
+  .rb.er { background: #FCEBEB; color: #A32D2D; }
+  .rb.id { background: var(--bg2); color: var(--txt2); }
+  .sumbar { background: var(--bg2); border-radius: var(--rad); padding: 10px 14px; font-size: 13px; color: var(--txt2); margin-top: 1rem; }
+  .logbox { margin-top: 1rem; background: var(--bg2); border-radius: var(--rad); padding: 12px 14px; font-family: var(--mono); font-size: 11px; color: var(--txt2); max-height: 180px; overflow-y: auto; display: none; }
+  .ll { margin-bottom: 3px; line-height: 1.5; }
+  .ll.ok { color: #3B6D11; } .ll.er { color: #A32D2D; } .ll.in { color: #185FA5; }
+  .src-label { font-size: 10px; color: var(--txt3); padding: 2px 0 0 2px; }
+  .del-btn { background: none; border: none; cursor: pointer; color: var(--txt3); font-size: 14px; padding: 2px 4px; border-radius: 3px; }
+  .del-btn:hover { color: #A32D2D; background: #FCEBEB; }
+  .add-row-btn { margin-top: 10px; font-size: 12px; padding: 6px 14px; }
+  .ci { width: 66px; } .cf { width: 21%; } .cc { width: 18%; } .ca { width: 105px; } .cd { width: 100px; } .cs { width: 85px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>Check settlement processor</h1>
+  <p class="sub">Upload check photos → auto-detect all checks → push to Google Sheets</p>
+
+  <div class="tabs">
+    <button class="tab active" onclick="go('upload')">1. Upload photos</button>
+    <button class="tab" onclick="go('review')">2. Review &amp; edit</button>
+    <button class="tab" onclick="go('push')">3. Push to Sheets</button>
+    <button class="tab" onclick="go('settings')" style="margin-left:auto;">Settings</button>
+  </div>
+
+  <!-- UPLOAD -->
+  <div class="panel active" id="panel-upload">
+    <div class="info">Upload photos — each photo can contain <strong>up to 10 checks</strong>. Claude will detect and extract all of them automatically.</div>
+    <div class="drop-zone" id="dz">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 12l4-4 4 4M12 8v8"/></svg>
+      <h3>Drop photos here</h3>
+      <p>One photo can contain multiple checks — JPG, PNG accepted</p>
+      <input type="file" accept="image/*" multiple onchange="handleFiles(this.files)">
+    </div>
+    <div class="pgrid" id="prev"></div>
+    <div class="btnrow">
+      <button class="btn p" id="ebtn" onclick="extractAll()" disabled>
+        <div class="spin" id="espin"></div>
+        <span id="elbl">Extract checks from photos</span>
+      </button>
+      <span class="cnt" id="ecnt"></span>
+    </div>
+    <div class="logbox" id="elog"></div>
+  </div>
+
+  <!-- REVIEW -->
+  <div class="panel" id="panel-review">
+    <div class="slbl">All detected checks — click any cell to edit, delete rows you don't need</div>
+    <div class="twrap">
+      <table class="rt">
+        <thead><tr>
+          <th class="ci">Source</th>
+          <th class="cf">Issuing firm</th>
+          <th class="cc">Client name</th>
+          <th class="ca">Amount ($)</th>
+          <th class="cd">Date</th>
+          <th class="cs">Status</th>
+          <th style="width:36px;"></th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <button class="btn add-row-btn" onclick="addBlankRow()">+ Add row manually</button>
+    <div class="sumbar" id="sumbar"></div>
+    <div class="btnrow" style="margin-top:1.25rem;">
+      <button class="btn" onclick="go('upload')">← Back</button>
+      <button class="btn p" onclick="go('push')">Continue →</button>
+    </div>
+  </div>
+
+  <!-- PUSH -->
+  <div class="panel" id="panel-push">
+    <div class="info">Ready to append <span id="pcnt">0</span> row(s) to your Google Sheet. Columns: Issuing Firm, Client Name, Amount, Date, Status, Date Logged.</div>
+    <div id="pprev"></div>
+    <div class="btnrow">
+      <button class="btn" onclick="go('review')">← Back</button>
+      <button class="btn p" id="pbtn" onclick="pushAll()">
+        <div class="spin" id="pspin"></div>
+        <span id="plbl">Push to Google Sheets</span>
+      </button>
+    </div>
+    <div class="logbox" id="plog"></div>
+  </div>
+
+  <!-- SETTINGS -->
+  <div class="panel" id="panel-settings">
+    <div class="field">
+      <label>Anthropic API key</label>
+      <input type="password" id="s-ant" placeholder="sk-ant-..." autocomplete="off">
+      <small>Powers Claude Vision. Get yours at <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a></small>
+    </div>
+    <div class="field">
+      <label>Google Sheet ID</label>
+      <input type="text" id="s-sid" placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms">
+      <small>From your Sheet URL: docs.google.com/spreadsheets/d/<strong>[ID HERE]</strong>/edit</small>
+    </div>
+    <div class="field">
+      <label>Sheet tab name</label>
+      <input type="text" id="s-tab" placeholder="Settlements">
+      <small>Exact name of the tab to append rows to</small>
+    </div>
+    <div class="field">
+      <label>Google Sheets API key</label>
+      <input type="password" id="s-gk" placeholder="AIza...">
+      <small>From <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console → Credentials</a>. Sheets API must be enabled. Sheet must be shared as "Anyone with link".</small>
+    </div>
+    <div style="display:flex;align-items:center;margin-top:0.5rem;">
+      <button class="btn" onclick="saveCfg()">Save settings</button>
+      <span id="smsg" style="margin-left:10px;font-size:12px;color:#3B6D11;opacity:0;transition:opacity 0.3s;">Saved</span>
+    </div>
+    <p style="font-size:11px;color:var(--txt3);margin-top:10px;">Stored in browser session only.</p>
+  </div>
+</div>
+
+<script>
+const ST = { files: [], photos: [], checks: [], cfg: {} };
+
+// Load settings from localStorage on startup
+window.onload = () => {
+  const savedCfg = localStorage.getItem('checkProcessorCfg');
+  if (savedCfg) {
+    try {
+      ST.cfg = JSON.parse(savedCfg);
+      document.getElementById('s-ant').value = ST.cfg.ant || '';
+      document.getElementById('s-sid').value = ST.cfg.sid || '';
+      document.getElementById('s-tab').value = ST.cfg.tab || '';
+      document.getElementById('s-gk').value = ST.cfg.gk || '';
+    } catch (e) {
+      console.error('Failed to load settings', e);
+    }
+  }
+};
+
+function go(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+  ['upload','review','push','settings'].forEach((n,i) => {
+    if (n === name) document.querySelectorAll('.tab')[i].classList.add('active');
+  });
+  if (name === 'push') renderPush();
+}
+
+function saveCfg() {
+  ST.cfg.ant = document.getElementById('s-ant').value.trim();
+  ST.cfg.sid = document.getElementById('s-sid').value.trim();
+  ST.cfg.tab = document.getElementById('s-tab').value.trim();
+  ST.cfg.gk  = document.getElementById('s-gk').value.trim();
+  
+  // Save to localStorage
+  localStorage.setItem('checkProcessorCfg', JSON.stringify(ST.cfg));
+  
+  const m = document.getElementById('smsg');
+  m.style.opacity = 1; setTimeout(() => m.style.opacity = 0, 2000);
+}
+
+const dz = document.getElementById('dz');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('over'); handleFiles(e.dataTransfer.files); });
+
+function handleFiles(files) {
+  Array.from(files).filter(f => f.type.startsWith('image/')).forEach(f => {
+    if (ST.files.find(x => x.name===f.name && x.size===f.size)) return;
+    ST.files.push(f);
+    ST.photos.push({ file: f, status: 'pending', count: 0, error: '' });
+  });
+  renderPrev();
+  document.getElementById('ebtn').disabled = ST.files.length === 0;
+}
+
+function renderPrev() {
+  const g = document.getElementById('prev');
+  g.innerHTML = '';
+  ST.photos.forEach((ph, i) => {
+    const url = URL.createObjectURL(ph.file);
+    const cls = ph.status==='ok'?'bd': ph.status==='err'?'be': ph.status==='working'?'bw':'bp';
+    const lbl = ph.status==='ok'? `${ph.count} check${ph.count!==1?'s':''} found`
+               : ph.status==='err'? 'error'
+               : ph.status==='working'? 'scanning...' : 'pending';
+    const d = document.createElement('div');
+    d.className = 'tw';
+    d.innerHTML = `<img src="${url}"><button class="xbtn" onclick="rmvPhoto(${i})">✕</button><span class="info-pill ${cls}">${lbl}</span>`;
+    g.appendChild(d);
+  });
+  const total = ST.photos.reduce((s,p) => s + (p.status==='ok'? p.count : 0), 0);
+  document.getElementById('ecnt').textContent = ST.files.length
+    ? `${ST.files.length} photo${ST.files.length!==1?'s':''} · ${total>0? total+' checks detected':''}`
+    : '';
+}
+
+function rmvPhoto(i) {
+  ST.files.splice(i,1); ST.photos.splice(i,1);
+  renderPrev();
+  document.getElementById('ebtn').disabled = ST.files.length === 0;
+}
+
+async function fileToB64(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result.split(',')[1]);
+    r.onerror = () => rej(new Error('Read failed'));
+    r.readAsDataURL(file);
+  });
+}
+
+function addLog(boxId, msg, type) {
+  const box = document.getElementById(boxId);
+  box.style.display = 'block';
+  const d = document.createElement('div');
+  d.className = 'll ' + (type||'in');
+  d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  box.appendChild(d); box.scrollTop = box.scrollHeight;
+}
+
+const PROMPT = `You are analyzing a photo that may contain one or more physical checks.
+
+Carefully examine the ENTIRE image and identify EVERY check visible, even partially visible ones.
+
+For each check extract:
+- firm: The company or law firm name printed in the top-left corner of that check (the issuer)
+- client: The client's PERSONAL NAME ONLY from the memo/note line at the bottom-left. The memo often contains extra text like case numbers, reference codes, fee descriptions, or labels. Ignore all of that and extract ONLY the person's first and last name. Examples: "MAN127 - Mann, James" becomes "James Mann". "Legal Fees/Laquanda Walker1091602" becomes "Laquanda Walker". "Participation Fee: Johnnie Robinson III" becomes "Johnnie Robinson III". "Re: Kelly Fey Thirtyone" becomes "Kelly Fey Thirtyone". If no person name is visible, use "".
+- amount: Dollar amount as digits only with decimal, no $ sign (e.g. "1250.00")
+- date: The date on that check (e.g. "03/18/2026")
+
+Return a JSON array with one object per check, ordered top-to-bottom as they appear.
+Reply with ONLY the raw JSON array — no markdown, no backticks, no explanation.
+
+Example for 3 checks:
+[{"firm":"Smith & Jones PA","client":"Maria Lopez","amount":"1250.00","date":"03/18/2026"},{"firm":"ABC Law","client":"John Doe","amount":"500.00","date":"03/15/2026"},{"firm":"XYZ Attorneys","client":"","amount":"750.50","date":"03/10/2026"}]`;
+
+async function extractAll() {
+  const apiKey = ST.cfg.ant || document.getElementById('s-ant').value.trim();
+  if (!apiKey) { alert('Enter your Anthropic API key in Settings first.'); go('settings'); return; }
+
+  const btn = document.getElementById('ebtn');
+  const spin = document.getElementById('espin');
+  const lbl = document.getElementById('elbl');
+  btn.disabled = true; spin.style.display = 'block';
+  document.getElementById('elog').innerHTML = '';
+  ST.checks = [];
+
+  for (let i = 0; i < ST.files.length; i++) {
+    lbl.textContent = `Scanning photo ${i+1} of ${ST.files.length}...`;
+    ST.photos[i].status = 'working';
+    renderPrev();
+
+    try {
+      addLog('elog', `Reading photo ${i+1}...`, 'in');
+      const b64 = await fileToB64(ST.files[i]);
+      const mt = ST.files[i].type || 'image/jpeg';
+
+      // Using claude-3-5-sonnet-20241022 as it's the current standard for vision tasks
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json', 
+          'x-api-key': apiKey, 
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerously-allow-browser': 'true' // Required for browser-based requests
+        },
+        body: JSON.stringify({
+          model: 'claude-3-5-sonnet-20241022',
+          max_tokens: 2000,
+          messages: [{ role: 'user', content: [
+            { type: 'image', source: { type: 'base64', media_type: mt, data: b64 } },
+            { type: 'text', text: PROMPT }
+          ]}]
+        })
+      });
+
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error.message);
+      const raw = data.content.map(c => c.text||'').join('').trim();
+      addLog('elog', `Photo ${i+1} response: ${raw.substring(0, 300)}`, 'in');
+
+      const arrMatch = raw.match(/\[[\s\S]*\]/);
+      if (!arrMatch) throw new Error(`No JSON array found: ${raw.substring(0,100)}`);
+      const parsed = JSON.parse(arrMatch[0]);
+      if (!Array.isArray(parsed) || parsed.length === 0) throw new Error('No checks detected in this photo');
+
+      const photoUrl = URL.createObjectURL(ST.files[i]);
+      parsed.forEach((p, j) => {
+        ST.checks.push({
+          photoUrl,
+          photoIndex: i,
+          checkIndex: j,
+          firm:   (p.firm   || '').trim(),
+          client: (p.client || '').trim(),
+          amount: (p.amount || '').toString().trim(),
+          date:   (p.date   || '').trim(),
+        });
+      });
+
+      ST.photos[i].status = 'ok';
+      ST.photos[i].count = parsed.length;
+      addLog('elog', `✓ Photo ${i+1}: ${parsed.length} check${parsed.length!==1?'s':''} found`, 'ok');
+
+    } catch(err) {
+      ST.photos[i].status = 'err';
+      ST.photos[i].error = err.message;
+      addLog('elog', `✗ Photo ${i+1} error: ${err.message}`, 'er');
+    }
+    renderPrev();
+  }
+
+  spin.style.display = 'none';
+  lbl.textContent = 'Extract checks from photos';
+  btn.disabled = false;
+  renderTable();
+  go('review');
+}
+
+function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+
+function renderTable() {
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+  ST.checks.forEach((c, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="ci">
+        ${c.photoUrl ? `<img src="${c.photoUrl}" class="ckt">` : '<div style="width:52px;height:32px;background:var(--bg2);border-radius:3px;"></div>'}
+        <div class="src-label">${c.photoIndex>=0?`Photo ${c.photoIndex+1} #${c.checkIndex+1}`:'manual'}</div>
+      </td>
+      <td class="cf"><input value="${esc(c.firm)}" placeholder="Issuing firm" oninput="ST.checks[${i}].firm=this.value; updateSummary();"></td>
+      <td class="cc"><input value="${esc(c.client)}" placeholder="(blank if not on memo)" oninput="ST.checks[${i}].client=this.value"></td>
+      <td class="ca"><input value="${esc(c.amount)}" placeholder="0.00" oninput="ST.checks[${i}].amount=this.value; updateSummary();"></td>
+      <td class="cd"><input value="${esc(c.date)}" placeholder="MM/DD/YYYY" oninput="ST.checks[${i}].date=this.value"></td>
+      <td class="cs"><span class="rb ok">Extracted</span></td>
+      <td style="width:36px;text-align:center;"><button class="del-btn" onclick="deleteRow(${i})" title="Remove">✕</button></td>`;
+    tbody.appendChild(tr);
+  });
+  updateSummary();
+}
+
+function updateSummary() {
+  const total = ST.checks.reduce((s,c) => s + (parseFloat((c.amount||'').replace(/[^0-9.]/g,''))||0), 0);
+  document.getElementById('sumbar').textContent =
+    `${ST.checks.length} check${ST.checks.length!==1?'s':''} · Total: $${total.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+}
+
+function deleteRow(i) { ST.checks.splice(i,1); renderTable(); }
+
+function addBlankRow() {
+  ST.checks.push({ photoUrl:'', photoIndex:-1, checkIndex:-1, firm:'', client:'', amount:'', date:'' });
+  renderTable();
+  const rows = document.getElementById('tbody').querySelectorAll('tr');
+  const last = rows[rows.length-1];
+  if (last) last.querySelector('input').focus();
+}
+
+function renderPush() {
+  document.getElementById('pcnt').textContent = ST.checks.length;
+  const div = document.getElementById('pprev');
+  if (!ST.checks.length) { div.innerHTML = '<p style="font-size:13px;color:var(--txt2);margin-bottom:1rem;">No checks loaded yet.</p>'; return; }
+  const hdr = ['#','Issuing firm','Client','Amount','Date','Status'].map(h =>
+    `<th style="text-align:left;font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.03em;color:var(--txt2);padding:6px 8px;border-bottom:0.5px solid var(--b3);">${h}</th>`).join('');
+  const rows = ST.checks.map((c,i) => `<tr>
+    <td style="padding:7px 8px;border-bottom:0.5px solid var(--b3);font-size:13px;color:var(--txt2);">${i+1}</td>
+    <td style="padding:7px 8px;border-bottom:0.5px solid var(--b3);font-size:13px;">${esc(c.firm)||'—'}</td>
+    <td style="padding:7px 8px;border-bottom:0.5px solid var(--b3);font-size:13px;">${esc(c.client)||'<span style="color:var(--txt3)">—</span>'}</td>
+    <td style="padding:7px 8px;border-bottom:0.5px solid var(--b3);font-size:13px;">${c.amount?'$'+c.amount:'—'}</td>
+    <td style="padding:7px 8px;border-bottom:0.5px solid var(--b3);font-size:13px;">${esc(c.date)||'—'}</td>
+    <td style="padding:7px 8px;border-bottom:0.5px solid var(--b3);font-size:13px;"><span style="background:#EAF3DE;color:#3B6D11;font-size:11px;padding:2px 8px;border-radius:4px;font-weight:500;">Settled</span></td>
+  </tr>`).join('');
+  div.innerHTML = `<div style="overflow-x:auto;margin-bottom:1rem;"><table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr>${hdr}</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+async function pushAll() {
+  const btn = document.getElementById('pbtn');
+  const spin = document.getElementById('pspin');
+  const lbl = document.getElementById('plbl');
+  btn.disabled = true; spin.style.display = 'block';
+  document.getElementById('plog').innerHTML = '';
+
+  const gk  = ST.cfg.gk  || document.getElementById('s-gk').value.trim();
+  const sid  = ST.cfg.sid  || document.getElementById('s-sid').value.trim();
+  const tab  = ST.cfg.tab  || document.getElementById('s-tab').value.trim() || 'Sheet1';
+
+  if (!gk)  { addLog('plog','Google Sheets API key missing — check Settings','er'); btn.disabled=false; spin.style.display='none'; return; }
+  if (!sid) { addLog('plog','Google Sheet ID missing — check Settings','er'); btn.disabled=false; spin.style.display='none'; return; }
+
+  let ok=0, fail=0;
+  for (let i=0; i<ST.checks.length; i++) {
+    const c = ST.checks[i];
+    lbl.textContent = `Pushing ${i+1} of ${ST.checks.length}...`;
+    addLog('plog', `Sending: ${c.firm||'?'} · ${c.client||'no client'} · $${c.amount}`, 'in');
+    try {
+      const values = [[c.firm, c.client, c.amount, c.date, 'Settled', new Date().toLocaleDateString()]];
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${encodeURIComponent(tab)}!A1:append?valueInputOption=USER_ENTERED&key=${gk}`;
+      const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({values}) });
+      if (!r.ok) { const e = await r.json(); throw new Error(e.error?.message || `HTTP ${r.status}`); }
+      addLog('plog', `✓ Added: ${c.firm}${c.client?' — '+c.client:''}`, 'ok');
+      ok++;
+    } catch(err) {
+      addLog('plog', `✗ Failed: ${err.message}`, 'er');
+      fail++;
+    }
+  }
+
+  spin.style.display = 'none'; lbl.textContent = 'Push to Google Sheets'; btn.disabled = false;
+  addLog('plog', `Done — ${ok} succeeded${fail?', '+fail+' failed':''}.`, fail?'er':'ok');
+}
+</script>
+</body>
+</html>
