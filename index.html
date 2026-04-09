@@ -337,21 +337,33 @@ function addLog(boxId, msg, type) {
 }
 
 // ── Claude extraction ────────────────────────────────────────────────────────
-const PROMPT = `You are analyzing a photo that may contain one or more physical checks.
+const PROMPT = `You are a precise data extraction assistant analyzing a photo of one or more printed/typed checks.
 
 Carefully examine the ENTIRE image and identify EVERY check visible, even partially visible ones.
 
-For each check extract:
-- firm: The company or law firm name printed in the top-left corner of that check (the issuer)
-- client: The client's PERSONAL NAME ONLY from the memo/note line at the bottom-left. The memo often contains extra text like case numbers, reference codes, fee descriptions, or labels. Ignore all of that and extract ONLY the person's first and last name. Examples: "MAN127 - Mann, James" becomes "James Mann". "Legal Fees/Laquanda Walker1091602" becomes "Laquanda Walker". "Participation Fee: Johnnie Robinson III" becomes "Johnnie Robinson III". "Re: Kelly Fey Thirtyone" becomes "Kelly Fey Thirtyone". If no person name is visible, use "".
-- amount: Dollar amount as digits only with decimal, no $ sign (e.g. "1250.00")
-- date: The date on that check (e.g. "03/18/2026")
+For each check, extract the following fields with extreme precision:
 
-Return a JSON array with one object per check, ordered top-to-bottom as they appear.
+1. firm: The issuing company or law firm name printed in the top-left corner of the check. Copy it exactly as printed.
+
+2. client: The individual person's name on the memo/note line (bottom-left of check). Rules:
+   - The memo line may contain extra text such as case numbers, reference codes, labels, slashes, dashes, or fee descriptions. Ignore all of that.
+   - Extract ONLY the person's full name as it is PRINTED on the check. Read every character carefully and literally — do not guess, infer, or paraphrase.
+   - If the name appears in "Last, First" format, convert it to "First Last".
+   - If the same name also appears on the "Pay to the order of" line, use that version as a cross-reference to verify your reading of the memo line. The pay-to line is often cleaner and more legible.
+   - Preserve middle names and suffixes (Jr., Sr., III, etc.) exactly as printed.
+   - If no person name is visible, use "".
+
+3. amount: The dollar amount as digits only with decimal point, no $ sign (e.g. "1250.00"). Read the numeric amount carefully.
+
+4. date: The date printed on the check in MM/DD/YYYY format (e.g. "03/18/2026").
+
+CRITICAL: Accuracy is essential. Read each character of the name literally from the printed text. Do not substitute similar-sounding letters or words. If a word looks unusual, that is how it is printed — copy it exactly.
+
+Return a JSON array with one object per check, ordered top-to-bottom as they appear in the image.
 Reply with ONLY the raw JSON array — no markdown, no backticks, no explanation.
 
-Example for 3 checks:
-[{"firm":"Smith & Jones PA","client":"Maria Lopez","amount":"1250.00","date":"03/18/2026"},{"firm":"ABC Law","client":"John Doe","amount":"500.00","date":"03/15/2026"},{"firm":"XYZ Attorneys","client":"","amount":"750.50","date":"03/10/2026"}]`;
+Example:
+[{"firm":"Smith & Jones PA","client":"Maria Lopez","amount":"1250.00","date":"03/18/2026"},{"firm":"ABC Law","client":"John Doe","amount":"500.00","date":"03/15/2026"}]`;
 
 async function extractAll() {
   const apiKey = ST.cfg.ant || document.getElementById('s-ant').value.trim();
@@ -495,8 +507,51 @@ function toMoney(val) {
 function parseMoney(val) {
   return parseFloat((val||'').toString().replace(/[^0-9.]/g, '')) || 0;
 }
+// Normalize a string: lowercase, collapse whitespace, strip punctuation
+function normStr(s) {
+  return (s||'').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// Levenshtein distance between two strings
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({length: m+1}, (_, i) => Array.from({length: n+1}, (_, j) => i === 0 ? j : j === 0 ? i : 0));
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+  return dp[m][n];
+}
+
+// Similarity ratio 0-1 (1 = identical)
+function similarity(a, b) {
+  const na = normStr(a), nb = normStr(b);
+  if (!na && !nb) return 1;
+  if (!na || !nb) return 0;
+  const maxLen = Math.max(na.length, nb.length);
+  return 1 - levenshtein(na, nb) / maxLen;
+}
+
+// Find the best matching existing record for a given firm+client pair.
+// Returns the matched key if similarity >= threshold, otherwise null.
+const FIRM_THRESHOLD = 0.85;   // firm name must be 85%+ similar
+const CLIENT_THRESHOLD = 0.82; // client name must be 82%+ similar
+
+function findFuzzyMatch(existing, firm, client) {
+  let bestKey = null, bestScore = -1;
+  for (const key of Object.keys(existing)) {
+    const [exFirm, exClient] = key.split('|||');
+    const firmSim   = similarity(firm, exFirm);
+    const clientSim = similarity(client, exClient);
+    if (firmSim >= FIRM_THRESHOLD && clientSim >= CLIENT_THRESHOLD) {
+      const score = firmSim + clientSim;
+      if (score > bestScore) { bestScore = score; bestKey = key; }
+    }
+  }
+  return bestKey;
+}
+
 function normKey(firm, client) {
-  return (firm||'').trim().toLowerCase() + '|||' + (client||'').trim().toLowerCase();
+  return normStr(firm) + '|||' + normStr(client);
 }
 
 // Fetch all existing rows from the sheet
@@ -565,19 +620,21 @@ async function pushAll() {
       const label = `${c.firm||'?'}${c.client ? ' — ' + c.client : ''}`;
 
       try {
-        if (existing[key]) {
-          const ex = existing[key];
+        // Use fuzzy match first, fall back to exact key
+        const matchedKey = findFuzzyMatch(existing, c.firm, c.client) || (existing[key] ? key : null);
+        if (matchedKey) {
+          const ex = existing[matchedKey];
           if (ex.date === (c.date||'').trim()) {
             // Same firm + client + date = exact duplicate, skip
             addLog('plog', `⊘ Skipped duplicate: ${label} (${c.date})`, 'in');
             skipped++;
           } else {
-            // Same firm + client, different date = add amounts, update row
+            // Same firm + client (fuzzy), different date = add amounts, update row
             const combined = parseMoney(ex.amount) + parseMoney(c.amount);
             addLog('plog', `↑ Updating: ${label} · ${toMoney(ex.amount)} + ${toMoney(c.amount)} = ${toMoney(combined)}`, 'in');
             await updateSheetRow(ex.rowNum, combined, c.date);
-            existing[key].amount = combined.toString();
-            existing[key].date = c.date;
+            existing[matchedKey].amount = combined.toString();
+            existing[matchedKey].date = c.date;
             addLog('plog', `✓ Updated row ${ex.rowNum}: ${label}`, 'ok');
             updated++;
           }
