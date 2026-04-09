@@ -295,28 +295,45 @@ function rmvPhoto(i) {
 }
 
 // Compress + resize image non-blocking using createImageBitmap + OffscreenCanvas.
-// Scales down to max 2048px on the long edge and targets ~1.5MB JPEG output.
+// Keeps full resolution and targets max 4.9MB JPEG at highest quality.
 async function compressImage(file) {
-  const MAX_PX = 2048;
-  const MAX_BYTES = 1.5 * 1024 * 1024;
+  const MAX_BYTES = 4.9 * 1024 * 1024;
+
+  // If file is already under the limit, just read it directly
+  if (file.size <= MAX_BYTES) {
+    return new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res({ b64: r.result.split(',')[1], mime: file.type || 'image/jpeg' });
+      r.onerror = () => rej(new Error('Read failed'));
+      r.readAsDataURL(file);
+    });
+  }
 
   // createImageBitmap decodes off the main thread — no freeze
   const bitmap = await createImageBitmap(file);
   const { width: w, height: h } = bitmap;
 
-  const scale = Math.min(1, MAX_PX / Math.max(w, h));
-  const tw = Math.round(w * scale);
-  const th = Math.round(h * scale);
-
-  const canvas = new OffscreenCanvas(tw, th);
+  // Keep full resolution, only scale down if absolutely needed
+  const canvas = new OffscreenCanvas(w, h);
   const ctx = canvas.getContext('2d');
-  ctx.drawImage(bitmap, 0, 0, tw, th);
+  ctx.drawImage(bitmap, 0, 0, w, h);
   bitmap.close();
 
-  // Try quality 0.85 first, drop to 0.7 if still too large
-  let blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
+  // Try quality 1.0 first, step down only until under 4.9MB
+  const qualities = [1.0, 0.97, 0.95, 0.92, 0.90, 0.85, 0.80];
+  let blob;
+  for (const q of qualities) {
+    blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: q });
+    if (blob.size <= MAX_BYTES) break;
+  }
+
+  // Last resort: scale down resolution to fit
   if (blob.size > MAX_BYTES) {
-    blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.7 });
+    const scale = Math.sqrt(MAX_BYTES / blob.size);
+    const sw = Math.round(w * scale), sh = Math.round(h * scale);
+    const canvas2 = new OffscreenCanvas(sw, sh);
+    canvas2.getContext('2d').drawImage(canvas, 0, 0, sw, sh);
+    blob = await canvas2.convertToBlob({ type: 'image/jpeg', quality: 0.92 });
   }
 
   return new Promise((res, rej) => {
