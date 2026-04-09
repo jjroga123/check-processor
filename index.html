@@ -173,7 +173,7 @@
     <div class="field">
       <label>Google Sheets API key</label>
       <input type="password" id="s-gk" placeholder="AIza...">
-      <small>From <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console → Credentials</a>. Sheets API must be enabled. Sheet must be shared as "Anyone with link".</small>
+      <small>From <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console → Credentials</a>. Sheets API must be enabled. Sheet must be shared as "Anyone with link → Editor".</small>
     </div>
     <div style="display:flex;align-items:center;margin-top:0.5rem;">
       <button class="btn" onclick="saveCfg()">Save settings</button>
@@ -185,22 +185,6 @@
 
 <script>
 const ST = { files: [], photos: [], checks: [], cfg: {} };
-
-// Load settings from localStorage on startup
-window.onload = () => {
-  const savedCfg = localStorage.getItem('checkProcessorCfg');
-  if (savedCfg) {
-    try {
-      ST.cfg = JSON.parse(savedCfg);
-      document.getElementById('s-ant').value = ST.cfg.ant || '';
-      document.getElementById('s-sid').value = ST.cfg.sid || '';
-      document.getElementById('s-tab').value = ST.cfg.tab || '';
-      document.getElementById('s-gk').value = ST.cfg.gk || '';
-    } catch (e) {
-      console.error('Failed to load settings', e);
-    }
-  }
-};
 
 function go(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -217,10 +201,6 @@ function saveCfg() {
   ST.cfg.sid = document.getElementById('s-sid').value.trim();
   ST.cfg.tab = document.getElementById('s-tab').value.trim();
   ST.cfg.gk  = document.getElementById('s-gk').value.trim();
-  
-  // Save to localStorage
-  localStorage.setItem('checkProcessorCfg', JSON.stringify(ST.cfg));
-  
   const m = document.getElementById('smsg');
   m.style.opacity = 1; setTimeout(() => m.style.opacity = 0, 2000);
 }
@@ -321,12 +301,11 @@ async function extractAll() {
       const b64 = await fileToB64(ST.files[i]);
       const mt = ST.files[i].type || 'image/jpeg';
 
-      // Using claude-3-5-sonnet-20241022 as it's the current standard for vision tasks
       const resp = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
         body: JSON.stringify({
-          model: 'claude-3-5-sonnet-20241022',
+          model: 'claude-opus-4-6',
           max_tokens: 2000,
           messages: [{ role: 'user', content: [
             { type: 'image', source: { type: 'base64', media_type: mt, data: b64 } },
@@ -389,9 +368,9 @@ function renderTable() {
         ${c.photoUrl ? `<img src="${c.photoUrl}" class="ckt">` : '<div style="width:52px;height:32px;background:var(--bg2);border-radius:3px;"></div>'}
         <div class="src-label">${c.photoIndex>=0?`Photo ${c.photoIndex+1} #${c.checkIndex+1}`:'manual'}</div>
       </td>
-      <td class="cf"><input value="${esc(c.firm)}" placeholder="Issuing firm" oninput="ST.checks[${i}].firm=this.value; updateSummary();"></td>
+      <td class="cf"><input value="${esc(c.firm)}" placeholder="Issuing firm" oninput="ST.checks[${i}].firm=this.value"></td>
       <td class="cc"><input value="${esc(c.client)}" placeholder="(blank if not on memo)" oninput="ST.checks[${i}].client=this.value"></td>
-      <td class="ca"><input value="${esc(c.amount)}" placeholder="0.00" oninput="ST.checks[${i}].amount=this.value; updateSummary();"></td>
+      <td class="ca"><input value="${esc(c.amount)}" placeholder="0.00" oninput="ST.checks[${i}].amount=this.value"></td>
       <td class="cd"><input value="${esc(c.date)}" placeholder="MM/DD/YYYY" oninput="ST.checks[${i}].date=this.value"></td>
       <td class="cs"><span class="rb ok">Extracted</span></td>
       <td style="width:36px;text-align:center;"><button class="del-btn" onclick="deleteRow(${i})" title="Remove">✕</button></td>`;
