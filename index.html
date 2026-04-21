@@ -399,29 +399,41 @@ const PROMPT = `You are a precise data extraction assistant analyzing a photo of
 
 Carefully examine the ENTIRE image and identify every check that is FULLY VISIBLE — meaning all four corners of the check are visible within the frame and the complete memo line is readable. DO NOT extract checks that are partially cut off, clipped by the edge of the photo, or obscured such that any corner or the memo line is missing. If a check is only partially visible, skip it entirely.
 
-For each check, extract the following fields with extreme precision:
+For each fully visible check, follow these rules:
+
+**STANDARD CHECK (single client):**
+The memo line contains one person's name and one amount. Return one object.
+
+**MULTI-CLIENT CHECK WITH REMITTANCE SLIP:**
+Some checks are accompanied by a remittance/breakdown slip (a separate attached document below or beside the check) that lists multiple client names with individual dollar amounts. The check itself shows the total amount. When you see this pattern:
+- Return ONE object per client listed on the remittance slip
+- Each object uses the SAME firm name and date from the check
+- Each object uses the individual client's name and their individual amount from the slip
+- DO NOT return the total check amount as a separate entry
+- The slip may list 2–5 clients — return all of them as separate rows
+
+For each row, extract these fields with extreme precision:
 
 1. firm: The issuing company or law firm name printed in the top-left corner of the check. Copy it exactly as printed.
 
-2. client: The individual person's name on the memo/note line (bottom-left of check). Rules:
-   - The memo line may contain extra text such as case numbers, reference codes, labels, slashes, dashes, or fee descriptions. Ignore all of that.
-   - Extract ONLY the person's full name as it is PRINTED on the check. Read every character carefully and literally — do not guess, infer, or paraphrase.
+2. client: The individual person's full name. Rules:
+   - Read every character carefully and literally — do not guess, infer, or paraphrase.
    - If the name appears in "Last, First" format, convert it to "First Last".
-   - If the same name also appears on the "Pay to the order of" line, use that version as a cross-reference to verify your reading of the memo line. The pay-to line is often cleaner and more legible.
+   - Cross-reference with the "Pay to the order of" line if available — it is often cleaner.
    - Preserve middle names and suffixes (Jr., Sr., III, etc.) exactly as printed.
    - If no person name is visible, use "".
 
-3. amount: The dollar amount as digits only with decimal point, no $ sign (e.g. "1250.00"). Read the numeric amount carefully.
+3. amount: The dollar amount as digits only with decimal point, no $ sign (e.g. "1250.00"). For multi-client checks, use each client's INDIVIDUAL amount from the slip, not the check total.
 
 4. date: The date printed on the check in MM/DD/YYYY format (e.g. "03/18/2026").
 
 CRITICAL: Accuracy is essential. Read each character of the name literally from the printed text. Do not substitute similar-sounding letters or words. If a word looks unusual, that is how it is printed — copy it exactly.
 
-Return a JSON array with one object per check, ordered top-to-bottom as they appear in the image.
+Return a JSON array with one object per client row, ordered top-to-bottom as they appear in the image.
 Reply with ONLY the raw JSON array — no markdown, no backticks, no explanation.
 
-Example:
-[{"firm":"Smith & Jones PA","client":"Maria Lopez","amount":"1250.00","date":"03/18/2026"},{"firm":"ABC Law","client":"John Doe","amount":"500.00","date":"03/15/2026"}]`;
+Example (multi-client check):
+[{"firm":"McMenamin & Wing","client":"Jeffrey Romgilla","amount":"2000.00","date":"03/19/2026"},{"firm":"McMenamin & Wing","client":"Michele Bridi","amount":"6666.66","date":"03/19/2026"},{"firm":"ABC Law","client":"John Doe","amount":"500.00","date":"03/15/2026"}]`;
 
 async function extractAll() {
   const apiKey = ANTHROPIC_KEY || ST.cfg.ant || document.getElementById('s-ant').value.trim();
